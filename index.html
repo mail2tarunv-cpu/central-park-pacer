@@ -438,6 +438,22 @@
       color: #fff;
     }
 
+    /* GPS accuracy indicator */
+    .gps-indicator {
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: .4px;
+      margin-top: 4px;
+      padding: 2px 6px;
+      border-radius: 5px;
+      display: inline-block;
+      font-family: inherit;
+    }
+    .gps-none { color: rgba(255,255,255,.4); }
+    .gps-good { color: #34C759; }
+    .gps-ok   { color: #FF9500; }
+    .gps-weak { color: #FF3B30; }
+
     /* Status pill */
     #hud-status {
       position: absolute;
@@ -750,6 +766,7 @@
           <div class="hud-elapsed" id="hud-elapsed">0:00</div>
           <div class="hud-route"   id="hud-route-name"></div>
           <button id="test-mode-btn" onclick="toggleTestMode()">TEST</button>
+          <div id="gps-indicator" class="gps-indicator gps-none">GPS: searching…</div>
         </div>
         <button class="hud-stop" onclick="stopRun()">Stop</button>
       </div>
@@ -816,10 +833,12 @@
       lastLon:    null,
       watchId:    null,
       timerTick:  null,
-      gpsReady:   false,
-      heading:    0,       // compass heading, degrees from true north
-      headingOk:  false,   // have received ≥1 valid compass reading
-      testMode:   false,   // simulate position along the route
+      gpsReady:    false,
+      gpsAccuracy: null,   // accuracy of last fix in metres (null = no fix yet)
+      gpsFixCount: 0,      // total fixes received this session
+      heading:     0,      // compass heading, degrees from true north
+      headingOk:   false,  // have received ≥1 valid compass reading
+      testMode:    false,  // simulate position along the route
     };
 
     /* ════════════════════════════════════════════════════
@@ -1022,10 +1041,10 @@
 
       three.scene = new THREE.Scene();
 
-      // Camera elevated ~2 m, angled down toward runner (lower-center of screen)
+      // Camera at eye height, angled down — pacer appears lower-center of screen
       three.camera = new THREE.PerspectiveCamera(60, W / H, 0.01, 200);
-      three.camera.position.set(0, 2.0, 0);
-      three.camera.lookAt(0, 0.7, -5);
+      three.camera.position.set(0, 1.7, 0);
+      three.camera.lookAt(0, 0.9, -8);
 
       three.scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.4));
       const sun = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -1048,8 +1067,8 @@
         // Plant feet at y = 0, store foot offset
         const box1 = new THREE.Box3().setFromObject(model);
         three.footY = -box1.min.y;
-        model.position.set(0, three.footY, -4);
-        model.rotation.y = 0;   // Soldier default pose faces -Z (away from camera)
+        model.position.set(0, three.footY, -12);
+        model.rotation.y = Math.PI;  // face away from camera (running ahead)
 
         three.scene.add(model);
         three.model = model;
@@ -1126,8 +1145,8 @@
       // No GPS yet → show pacer straight ahead at fixed depth
       if (!state.gpsReady || state.lastLat === null) {
         three.model.visible = true;
-        three.model.position.set(0, three.footY, -4);
-        three.model.rotation.y = 0;
+        three.model.position.set(0, three.footY, -12);
+        three.model.rotation.y = Math.PI;
         hideArrow(); return;
       }
 
@@ -1145,15 +1164,15 @@
 
       if (inCone && inRange) {
         three.model.visible = true;
-        const D   = 4;                              // 3-D display distance (m)
+        const D   = 12;                             // display distance (m) ≈ 10-15 m ahead
         const bdR = bearDelta * D2R;
         three.model.position.set(
           Math.sin(bdR) * D,
           three.footY,
           -Math.cos(bdR) * D
         );
-        // Rotate pacer to face the direction it is running on the route
-        three.model.rotation.y = routeDelta * D2R;
+        // Face the direction the route is heading, offset by π so back faces camera
+        three.model.rotation.y = Math.PI + routeDelta * D2R;
         hideArrow();
       } else {
         three.model.visible = false;
@@ -1313,11 +1332,14 @@
       initThree();
 
       // Init run state
-      state.startTime = Date.now();
-      state.distMiles = 0;
-      state.lastLat   = null;
-      state.lastLon   = null;
-      state.gpsReady  = false;
+      state.startTime   = Date.now();
+      state.distMiles   = 0;
+      state.lastLat     = null;
+      state.lastLon     = null;
+      state.gpsReady    = false;
+      state.gpsAccuracy = null;
+      state.gpsFixCount = 0;
+      updateGPSIndicator();
 
       // Elapsed timer (every second)
       state.timerTick = setInterval(tickTimer, 1000);
@@ -1348,13 +1370,17 @@
     }
 
     function onGPS(pos) {
-      const { latitude: lat, longitude: lon } = pos.coords;
+      const { latitude: lat, longitude: lon, accuracy } = pos.coords;
+
+      state.gpsAccuracy = accuracy;
+      state.gpsFixCount++;
 
       if (!state.testMode) {
         if (state.lastLat !== null) {
           const d  = haversine(state.lastLat, state.lastLon, lat, lon);
           const dm = d * 1609.34;
-          if (dm >= 2 && dm <= 80) state.distMiles += d;
+          // Accept 1–200 m per fix (1 m floor catches slow walking; 200 m ceiling drops teleports)
+          if (dm >= 1 && dm <= 200) state.distMiles += d;
         }
         state.lastLat  = lat;
         state.lastLon  = lon;
@@ -1362,12 +1388,32 @@
       }
       // In test mode: ignore real fix; applyTestMode() owns lat/lon
 
+      updateGPSIndicator();
       refreshHUD();
     }
 
     function onGPSErr(e) {
-      console.warn('GPS error', e);
-      setStatus('GPS unavailable', 'waiting');
+      console.warn('GPS error', e.code, e.message);
+      const msgs = ['', 'Permission denied — enable Location in Settings', 'GPS unavailable', 'GPS timed out'];
+      state.gpsAccuracy = null;
+      updateGPSIndicator();
+      // Show a persistent pill if we've never gotten a fix
+      if (!state.gpsReady) setStatus(msgs[e.code] || 'GPS error', 'waiting');
+    }
+
+    function updateGPSIndicator() {
+      const el = document.getElementById('gps-indicator');
+      if (!el) return;
+      const count = state.gpsFixCount;
+      const acc   = state.gpsAccuracy;
+      if (acc === null) {
+        el.textContent = 'GPS: searching…';
+        el.className = 'gps-indicator gps-none';
+      } else {
+        const bars = acc < 10 ? '●●●' : acc < 30 ? '●●○' : '●○○';
+        el.textContent = `GPS ${bars}  ±${Math.round(acc)}m`;
+        el.className = 'gps-indicator ' + (acc < 15 ? 'gps-good' : acc < 50 ? 'gps-ok' : 'gps-weak');
+      }
     }
 
     /* ════════════════════════════════════════════════════
@@ -1435,10 +1481,12 @@
         vid.srcObject.getTracks().forEach(t => t.stop());
         vid.srcObject = null;
       }
-      state.startTime = null;
-      state.distMiles = 0;
-      state.gpsReady  = false;
-      state.headingOk = false;
+      state.startTime   = null;
+      state.distMiles   = 0;
+      state.gpsReady    = false;
+      state.gpsAccuracy = null;
+      state.gpsFixCount = 0;
+      state.headingOk   = false;
       state.testMode  = false;
       const tb = document.getElementById('test-mode-btn');
       if (tb) tb.classList.remove('active');
