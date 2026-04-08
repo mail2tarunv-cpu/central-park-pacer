@@ -766,7 +766,7 @@
           <div class="hud-elapsed" id="hud-elapsed">0:00</div>
           <div class="hud-route"   id="hud-route-name"></div>
           <button id="test-mode-btn" onclick="toggleTestMode()">TEST</button>
-          <div id="gps-indicator" class="gps-indicator gps-none">GPS: searching…</div>
+          <div id="gps-indicator" class="gps-indicator gps-none">GPS: acquiring…</div>
         </div>
         <button class="hud-stop" onclick="stopRun()">Stop</button>
       </div>
@@ -1041,10 +1041,10 @@
 
       three.scene = new THREE.Scene();
 
-      // Camera at eye height, angled down — pacer appears lower-center of screen
-      three.camera = new THREE.PerspectiveCamera(60, W / H, 0.01, 200);
-      three.camera.position.set(0, 1.7, 0);
-      three.camera.lookAt(0, 0.9, -8);
+      // Camera pulled well back so the figure appears small (person 15 m ahead)
+      three.camera = new THREE.PerspectiveCamera(60, W / H, 0.01, 500);
+      three.camera.position.set(0, 1.6, 8);
+      three.camera.lookAt(0, 1, 0);
 
       three.scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.4));
       const sun = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -1067,8 +1067,9 @@
         // Plant feet at y = 0, store foot offset
         const box1 = new THREE.Box3().setFromObject(model);
         three.footY = -box1.min.y;
-        model.position.set(0, three.footY, -12);
-        model.rotation.y = Math.PI;  // face away from camera (running ahead)
+        // Camera is at Z=8; Z=-7 puts model 15 m ahead along Z axis
+        model.position.set(0, three.footY, -7);
+        model.rotation.y = Math.PI;  // face away from camera
 
         three.scene.add(model);
         three.model = model;
@@ -1142,10 +1143,10 @@
       const pacerPos   = positionAtDistance(pacerDistM);
       const pacerBear  = bearingAtDistance(pacerDistM);
 
-      // No GPS yet → show pacer straight ahead at fixed depth
-      if (!state.gpsReady || state.lastLat === null) {
+      // No GPS or no compass → show pacer locked straight ahead
+      if (!state.gpsReady || state.lastLat === null || !state.headingOk) {
         three.model.visible = true;
-        three.model.position.set(0, three.footY, -12);
+        three.model.position.set(0, three.footY, -7);  // 15 m ahead (camZ=8, 8-15=-7)
         three.model.rotation.y = Math.PI;
         hideArrow(); return;
       }
@@ -1164,14 +1165,15 @@
 
       if (inCone && inRange) {
         three.model.visible = true;
-        const D   = 12;                             // display distance (m) ≈ 10-15 m ahead
+        const D   = 15;      // display distance from camera (m); camera is at Z=8
         const bdR = bearDelta * D2R;
+        // Camera is at (0, 1.6, 8) — offset model from camera position
         three.model.position.set(
           Math.sin(bdR) * D,
           three.footY,
-          -Math.cos(bdR) * D
+          8 - Math.cos(bdR) * D   // 8 - 15 = -7 for straight ahead
         );
-        // Face the direction the route is heading, offset by π so back faces camera
+        // Face the direction the route is heading; π offset so back is toward camera
         three.model.rotation.y = Math.PI + routeDelta * D2R;
         hideArrow();
       } else {
@@ -1308,6 +1310,11 @@
        START AR SESSION
     ═════════════════════════════════════════════════════ */
     async function startARSession() {
+      // ── Compass permission MUST be requested synchronously inside the
+      //    user-gesture handler on iOS 13+.  Any await before this call
+      //    would invalidate the activation context and the prompt won't show.
+      requestCompass();
+
       navTo('ar-screen');
       await new Promise(r => setTimeout(r, 50)); // let DOM paint
 
@@ -1325,8 +1332,7 @@
         document.getElementById('no-camera').style.display = 'flex';
       }
 
-      // Compass (DeviceOrientation — iOS 13+ needs explicit permission)
-      requestCompass();
+      // (compass already requested above)
 
       // Start Three.js renderer
       initThree();
@@ -1404,14 +1410,12 @@
     function updateGPSIndicator() {
       const el = document.getElementById('gps-indicator');
       if (!el) return;
-      const count = state.gpsFixCount;
-      const acc   = state.gpsAccuracy;
+      const acc = state.gpsAccuracy;
       if (acc === null) {
-        el.textContent = 'GPS: searching…';
+        el.textContent = 'GPS: acquiring…';
         el.className = 'gps-indicator gps-none';
       } else {
-        const bars = acc < 10 ? '●●●' : acc < 30 ? '●●○' : '●○○';
-        el.textContent = `GPS ${bars}  ±${Math.round(acc)}m`;
+        el.textContent = `GPS: ${Math.round(acc)}m accuracy`;
         el.className = 'gps-indicator ' + (acc < 15 ? 'gps-good' : acc < 50 ? 'gps-ok' : 'gps-weak');
       }
     }
