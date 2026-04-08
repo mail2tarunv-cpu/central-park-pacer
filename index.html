@@ -953,7 +953,7 @@
       model: null, footY: 0,
     };
 
-    const GLB_URL = 'https://modelviewer.dev/shared-assets/models/RobotExpressive.glb';
+    const GLB_URL = 'https://threejs.org/examples/models/gltf/Soldier.glb';
 
     function initThree() {
       const canvas = document.getElementById('three-canvas');
@@ -1002,8 +1002,8 @@
 
         if (clips.length > 0) {
           three.mixer = new THREE.AnimationMixer(model);
-          const clip = THREE.AnimationClip.findByName(clips, 'Running')
-                    || THREE.AnimationClip.findByName(clips, 'Run')
+          const clip = THREE.AnimationClip.findByName(clips, 'Run')
+                    || THREE.AnimationClip.findByName(clips, 'Running')
                     || THREE.AnimationClip.findByName(clips, 'run')
                     || clips[0];
           three.action = three.mixer.clipAction(clip);
