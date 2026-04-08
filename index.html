@@ -325,14 +325,20 @@
 
     #runner-viewer {
       position: absolute;
-      left: 0; top: 0;
+      inset: 0;
       width: 100%;
-      height: 80%;
-      background-color: transparent;
+      height: 100%;
+      background-color: transparent !important;
       --poster-color: transparent;
       z-index: 1;
       pointer-events: none;
+      /* force the shadow-root canvas to be transparent */
+      --mv-shadow-color: transparent;
     }
+
+    /* Punch through any default background model-viewer injects */
+    #runner-viewer::part(default-ar-button) { display: none; }
+    #runner-viewer canvas { background: transparent !important; }
 
     /* Camera unavailable fallback */
     .no-camera {
@@ -682,9 +688,13 @@
       id="runner-viewer"
       src="https://mail2tarunv-cpu.github.io/central-park-pacer/runner.glb"
       autoplay
-      camera-orbit="0deg 80deg auto"
+      camera-orbit="0deg 78deg 2.8m"
       interaction-prompt="none"
+      interaction-prompt-style="basic"
       loading="eager"
+      reveal="auto"
+      shadow-intensity="0.6"
+      environment-image="neutral"
     ></model-viewer>
 
     <!-- HUD overlay -->
