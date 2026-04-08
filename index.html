@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#ffffff">
+  <title>Central Park Pacer</title>
+  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
+  <style>
+    /* ─── Reset ─────────────────────────────────────── */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text',
+                   'Helvetica Neue', sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -webkit-text-size-adjust: 100%;
+      background: #F2F2F7;
+      color: #000;
+    }
+
+    /* ─── Design Tokens ─────────────────────────────── */
+    :root {
+      --blue:        #007AFF;
+      --green:       #34C759;
+      --red:         #FF3B30;
+      --orange:      #FF9500;
+      --bg:          #F2F2F7;
+      --bg2:         #E5E5EA;
+      --card:        #FFFFFF;
+      --label:       #000000;
+      --label2:      rgba(60,60,67,0.6);
+      --label3:      #8E8E93;
+      --separator:   rgba(60,60,67,0.12);
+      --fill:        rgba(120,120,128,0.12);
+      --safe-top:    env(safe-area-inset-top,    44px);
+      --safe-bottom: env(safe-area-inset-bottom, 34px);
+    }
+
+    /* ─── Screen Shell ───────────────────────────────── */
+    .screen {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      will-change: transform, opacity;
+    }
+    .screen[hidden] { display: none !important; }
+
+    /* ─── Transitions (applied by JS) ───────────────── */
+    .slide-enter  { animation: slideIn  .32s cubic-bezier(.32,.72,0,1) both; }
+    .slide-exit   { animation: slideOut .32s cubic-bezier(.32,.72,0,1) both; }
+    .slide-back-enter { animation: slideBackIn  .32s cubic-bezier(.32,.72,0,1) both; }
+    .slide-back-exit  { animation: slideBackOut .32s cubic-bezier(.32,.72,0,1) both; }
+    .fade-out     { animation: fadeOut .25s ease both; }
+
+    @keyframes slideIn      { from { opacity:0; transform:translateX(40px) } to { opacity:1; transform:none } }
+    @keyframes slideOut     { from { opacity:1; transform:none } to { opacity:0; transform:translateX(-40px) } }
+    @keyframes slideBackIn  { from { opacity:0; transform:translateX(-40px) } to { opacity:1; transform:none } }
+    @keyframes slideBackOut { from { opacity:1; transform:none } to { opacity:0; transform:translateX(40px) } }
+    @keyframes fadeOut      { from { opacity:1 } to { opacity:0 } }
+    @keyframes spin         { to   { transform: rotate(360deg) } }
+    @keyframes pulse        { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    /* ─── Shared Layout ─────────────────────────────── */
+    .scroll-content {
+      flex: 1;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 0 16px calc(var(--safe-bottom) + 24px);
+    }
+
+    /* Nav Bar */
+    .nav-bar {
+      display: flex;
+      align-items: flex-end;
+      padding: calc(var(--safe-top) + 4px) 16px 12px;
+      background: rgba(242,242,247,.92);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: .5px solid var(--separator);
+      flex-shrink: 0;
+      gap: 8px;
+    }
+    .nav-title {
+      flex: 1;
+      text-align: center;
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: -.3px;
+    }
+    .nav-back {
+      min-width: 72px;
+      background: none;
+      border: none;
+      color: var(--blue);
+      font-size: 17px;
+      font-family: inherit;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      padding: 0;
+    }
+    .nav-spacer { min-width: 72px; }
+
+    /* Section header */
+    .section-header {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: .3px;
+      text-transform: uppercase;
+      color: var(--label3);
+      padding: 20px 4px 8px;
+    }
+
+    /* Grouped list card */
+    .list-card {
+      background: var(--card);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 1px 0 var(--separator), 0 2px 8px rgba(0,0,0,.06);
+    }
+    .list-row {
+      display: flex;
+      align-items: center;
+      padding: 14px 18px;
+      cursor: pointer;
+      -webkit-user-select: none;
+      user-select: none;
+      border-bottom: .5px solid var(--separator);
+      transition: background .12s;
+      text-decoration: none;
+    }
+    .list-row:last-child { border-bottom: none; }
+    .list-row:active { background: var(--fill); }
+
+    .row-icon {
+      width: 38px; height: 38px;
+      border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 19px;
+      flex-shrink: 0;
+      margin-right: 14px;
+    }
+    .row-body   { flex: 1; min-width: 0; }
+    .row-title  { font-size: 17px; font-weight: 600; letter-spacing: -.3px; color: var(--label); }
+    .row-sub    { font-size: 14px; color: var(--label3); margin-top: 1px; }
+    .row-chevron{ color: var(--label3); flex-shrink: 0; margin-left: 8px; }
+
+    /* Primary button */
+    .btn-primary {
+      display: block;
+      width: 100%;
+      padding: 16px;
+      background: var(--blue);
+      color: #fff;
+      border: none;
+      border-radius: 14px;
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: -.2px;
+      text-align: center;
+      cursor: pointer;
+      font-family: inherit;
+      transition: opacity .12s, transform .12s;
+      -webkit-user-select: none;
+    }
+    .btn-primary:active { opacity: .8; transform: scale(.99); }
+    .btn-primary:disabled { opacity: .38; pointer-events: none; }
+
+    /* ═══════════════════════════════════════════════════
+       LOADING SCREEN
+    ═══════════════════════════════════════════════════ */
+    #loading-screen {
+      background: #fff;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+    }
+    .app-icon {
+      width: 84px; height: 84px;
+      border-radius: 22px;
+      background: linear-gradient(145deg, #007AFF 0%, #5AC8FA 100%);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 42px;
+      box-shadow: 0 12px 32px rgba(0,122,255,.3);
+      margin-bottom: 22px;
+    }
+    .app-title {
+      font-size: 30px;
+      font-weight: 700;
+      letter-spacing: -.6px;
+      color: var(--label);
+      margin-bottom: 6px;
+    }
+    .app-sub {
+      font-size: 15px;
+      color: var(--label3);
+      margin-bottom: 52px;
+    }
+    .spinner {
+      width: 26px; height: 26px;
+      border: 3px solid var(--bg2);
+      border-top-color: var(--blue);
+      border-radius: 50%;
+      animation: spin .75s linear infinite;
+    }
+
+    /* ═══════════════════════════════════════════════════
+       ROUTE SCREEN
+    ═══════════════════════════════════════════════════ */
+    #route-screen { background: var(--bg); }
+    .large-title-area {
+      padding: calc(var(--safe-top) + 12px) 20px 6px;
+      flex-shrink: 0;
+    }
+    .large-title {
+      font-size: 34px;
+      font-weight: 700;
+      letter-spacing: -.5px;
+      margin-bottom: 4px;
+    }
+    .large-sub { font-size: 15px; color: var(--label3); }
+
+    /* ═══════════════════════════════════════════════════
+       PACE SCREEN
+    ═══════════════════════════════════════════════════ */
+    #pace-screen { background: var(--bg); }
+
+    .pace-card {
+      background: var(--card);
+      border-radius: 16px;
+      padding: 18px 18px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      cursor: pointer;
+      border: 2px solid transparent;
+      box-shadow: 0 1px 0 var(--separator), 0 2px 8px rgba(0,0,0,.05);
+      transition: border-color .15s, background .15s, transform .1s;
+      -webkit-user-select: none;
+    }
+    .pace-card.selected {
+      border-color: var(--blue);
+      background: rgba(0,122,255,.05);
+    }
+    .pace-card:active { transform: scale(.98); }
+
+    .pace-icon {
+      width: 46px; height: 46px;
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px;
+      flex-shrink: 0;
+    }
+    .pace-info { flex: 1; min-width: 0; }
+    .pace-name { font-size: 17px; font-weight: 600; letter-spacing: -.3px; }
+    .pace-desc { font-size: 13px; color: var(--label3); margin-top: 2px; }
+    .pace-value { font-size: 22px; font-weight: 700; letter-spacing: -.5px; }
+
+    /* Finish time card */
+    .finish-card {
+      background: rgba(0,122,255,.1);
+      border-radius: 14px;
+      padding: 16px 18px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-top: 16px;
+    }
+    .finish-emoji { font-size: 28px; flex-shrink: 0; }
+    .finish-label { font-size: 13px; color: var(--blue); font-weight: 500; margin-bottom: 3px; }
+    .finish-time  { font-size: 26px; font-weight: 700; color: var(--blue); letter-spacing: -.5px; }
+
+    /* ═══════════════════════════════════════════════════
+       PERMISSION SCREEN
+    ═══════════════════════════════════════════════════ */
+    #permission-screen {
+      background: var(--bg);
+      align-items: center;
+      justify-content: center;
+      padding: 48px 28px calc(var(--safe-bottom) + 32px);
+      text-align: center;
+    }
+    .perm-icon {
+      width: 80px; height: 80px;
+      border-radius: 22px;
+      background: linear-gradient(145deg, #5856D6, #AF52DE);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 38px;
+      box-shadow: 0 10px 28px rgba(88,86,214,.3);
+      margin-bottom: 24px;
+    }
+    .perm-title { font-size: 26px; font-weight: 700; letter-spacing: -.5px; margin-bottom: 10px; }
+    .perm-desc  { font-size: 15px; color: var(--label3); line-height: 1.55; margin-bottom: 28px; max-width: 300px; }
+    .perm-items { width: 100%; display: flex; flex-direction: column; gap: 10px; margin-bottom: 32px; }
+    .perm-item  {
+      background: var(--card);
+      border-radius: 14px;
+      padding: 14px 16px;
+      display: flex; align-items: center; gap: 14px;
+      text-align: left;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    }
+    .perm-item-icon  { font-size: 26px; flex-shrink: 0; }
+    .perm-item-title { font-size: 15px; font-weight: 600; color: var(--label); }
+    .perm-item-sub   { font-size: 13px; color: var(--label3); margin-top: 1px; }
+
+    /* ═══════════════════════════════════════════════════
+       AR SCREEN
+    ═══════════════════════════════════════════════════ */
+    #ar-screen { background: #000; }
+
+    #camera-video {
+      position: absolute;
+      inset: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+      z-index: 0;
+    }
+
+    #runner-viewer {
+      position: absolute;
+      left: 0; top: 0;
+      width: 100%;
+      height: 80%;
+      background-color: transparent;
+      --poster-color: transparent;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    /* Camera unavailable fallback */
+    .no-camera {
+      position: absolute;
+      inset: 0;
+      background: #1C1C1E;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 12px;
+      z-index: 0;
+    }
+    .no-camera-icon  { font-size: 52px; }
+    .no-camera-title { font-size: 18px; font-weight: 600; color: #fff; }
+    .no-camera-sub   { font-size: 14px; color: rgba(255,255,255,.5); text-align: center; max-width: 240px; line-height: 1.5; }
+
+    /* ─── HUD ─────────────────────────────────────────── */
+    #hud {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      pointer-events: none;
+    }
+
+    /* Top bar */
+    .hud-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: calc(var(--safe-top) + 10px) 20px 16px;
+      background: linear-gradient(to bottom, rgba(0,0,0,.52) 0%, transparent 100%);
+    }
+    .hud-left {}
+    .hud-elapsed {
+      font-size: 22px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: .5px;
+      font-variant-numeric: tabular-nums;
+    }
+    .hud-route {
+      font-size: 12px;
+      color: rgba(255,255,255,.65);
+      font-weight: 500;
+      margin-top: 2px;
+    }
+    .hud-stop {
+      background: rgba(255,59,48,.82);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: none;
+      border-radius: 22px;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      font-family: inherit;
+      padding: 10px 20px;
+      cursor: pointer;
+      pointer-events: all;
+    }
+    .hud-stop:active { opacity: .8; }
+
+    /* Status pill */
+    #hud-status {
+      position: absolute;
+      top: calc(var(--safe-top) + 66px);
+      left: 50%;
+      transform: translateX(-50%);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-radius: 22px;
+      padding: 7px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+      white-space: nowrap;
+      transition: background .4s ease;
+      letter-spacing: .1px;
+    }
+    #hud-status.waiting  { background: rgba(0,0,0,.5); }
+    #hud-status.on-pace  { background: rgba(0,122,255,.8); }
+    #hud-status.ahead    { background: rgba(52,199,89,.82); }
+    #hud-status.behind   { background: rgba(255,59,48,.82); }
+
+    /* Pacer label */
+    #pacer-label {
+      position: absolute;
+      top: calc(var(--safe-top) + 110px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,.45);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-radius: 10px;
+      padding: 4px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(255,255,255,.8);
+      letter-spacing: .6px;
+      text-transform: uppercase;
+      white-space: nowrap;
+      animation: pulse 2.5s ease-in-out infinite;
+    }
+
+    /* Bottom card */
+    .hud-bottom {
+      padding: 0 14px calc(var(--safe-bottom) + 14px);
+      background: linear-gradient(to top, rgba(0,0,0,.55) 0%, transparent 100%);
+      padding-top: 48px;
+    }
+    .hud-card {
+      background: rgba(28,28,30,.76);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border-radius: 22px;
+      padding: 20px 22px 18px;
+      border: .5px solid rgba(255,255,255,.1);
+    }
+
+    /* Big pace display */
+    .pace-display {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+    .pace-big {
+      font-size: 56px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -2.5px;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+    .pace-unit {
+      font-size: 18px;
+      color: rgba(255,255,255,.55);
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+    .pace-target {
+      text-align: center;
+      font-size: 13px;
+      color: rgba(255,255,255,.45);
+      margin-bottom: 18px;
+    }
+    .pace-target strong { color: rgba(255,255,255,.8); font-weight: 600; }
+
+    /* Stats row */
+    .stats-row {
+      display: grid;
+      grid-template-columns: 1fr 1px 1fr 1px 1fr;
+    }
+    .stat { text-align: center; padding: 0 4px; }
+    .stat-divider { background: rgba(255,255,255,.13); align-self: stretch; }
+    .stat-val {
+      font-size: 21px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -.5px;
+      font-variant-numeric: tabular-nums;
+    }
+    .stat-lbl {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .5px;
+      text-transform: uppercase;
+      color: rgba(255,255,255,.42);
+      margin-top: 3px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ════════════════════════════════════════
+       LOADING SCREEN
+  ═════════════════════════════════════════ -->
+  <div class="screen" id="loading-screen">
+    <div class="app-icon">🏃</div>
+    <div class="app-title">Central Park Pacer</div>
+    <div class="app-sub">Your virtual running coach</div>
+    <div class="spinner"></div>
+  </div>
+
+  <!-- ════════════════════════════════════════
+       ROUTE SELECTION
+  ═════════════════════════════════════════ -->
+  <div class="screen" id="route-screen" hidden>
+    <div class="large-title-area">
+      <div class="large-title">Choose Route</div>
+      <div class="large-sub">Select your course for today</div>
+    </div>
+    <div class="scroll-content">
+      <div class="section-header">New York City Parks</div>
+      <div class="list-card">
+
+        <div class="list-row" onclick="onRouteSelect('central-park')">
+          <div class="row-icon" style="background:rgba(0,122,255,.12)">🌳</div>
+          <div class="row-body">
+            <div class="row-title">Central Park Loop</div>
+            <div class="row-sub">6.1 miles · Manhattan, NY</div>
+          </div>
+          <svg class="row-chevron" width="8" height="14" viewBox="0 0 8 14" fill="none">
+            <path d="M1 1l6 6-6 6" stroke="currentColor" stroke-width="1.6"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+
+        <div class="list-row" onclick="onRouteSelect('prospect-park')">
+          <div class="row-icon" style="background:rgba(52,199,89,.12)">🌿</div>
+          <div class="row-body">
+            <div class="row-title">Prospect Park Loop</div>
+            <div class="row-sub">3.35 miles · Brooklyn, NY</div>
+          </div>
+          <svg class="row-chevron" width="8" height="14" viewBox="0 0 8 14" fill="none">
+            <path d="M1 1l6 6-6 6" stroke="currentColor" stroke-width="1.6"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════
+       PACE SELECTION
+  ═════════════════════════════════════════ -->
+  <div class="screen" id="pace-screen" hidden>
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack('route-screen')">
+        <svg width="9" height="16" viewBox="0 0 9 16" fill="none">
+          <path d="M8 1L2 8l6 7" stroke="currentColor" stroke-width="1.7"
+                stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Back
+      </button>
+      <div class="nav-title" id="pace-nav-title">Choose Pace</div>
+      <div class="nav-spacer"></div>
+    </div>
+
+    <div class="scroll-content">
+      <div class="section-header" id="pace-route-label"></div>
+
+      <div style="display:flex; flex-direction:column; gap:12px; margin-top:4px;">
+
+        <div class="pace-card" data-pace="easy" onclick="onPaceSelect(this)">
+          <div class="pace-icon" style="background:rgba(52,199,89,.13)">🚶</div>
+          <div class="pace-info">
+            <div class="pace-name">Easy</div>
+            <div class="pace-desc">10:00 / mile · Conversational</div>
+          </div>
+          <div class="pace-value" style="color:#34C759">10:00</div>
+        </div>
+
+        <div class="pace-card" data-pace="moderate" onclick="onPaceSelect(this)">
+          <div class="pace-icon" style="background:rgba(255,149,0,.13)">🏃</div>
+          <div class="pace-info">
+            <div class="pace-name">Moderate</div>
+            <div class="pace-desc">8:00 / mile · Tempo</div>
+          </div>
+          <div class="pace-value" style="color:#FF9500">8:00</div>
+        </div>
+
+        <div class="pace-card" data-pace="race" onclick="onPaceSelect(this)">
+          <div class="pace-icon" style="background:rgba(255,59,48,.13)">⚡</div>
+          <div class="pace-info">
+            <div class="pace-name">Race</div>
+            <div class="pace-desc">6:00 / mile · Full effort</div>
+          </div>
+          <div class="pace-value" style="color:#FF3B30">6:00</div>
+        </div>
+
+      </div>
+
+      <div class="finish-card" id="finish-card" style="display:none">
+        <div class="finish-emoji">🏁</div>
+        <div>
+          <div class="finish-label">Estimated Finish</div>
+          <div class="finish-time" id="finish-time-val">—</div>
+        </div>
+      </div>
+
+      <button class="btn-primary" id="pace-next-btn"
+              onclick="navTo('permission-screen')" disabled
+              style="margin-top:24px">
+        Continue
+      </button>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════
+       PERMISSION SCREEN
+  ═════════════════════════════════════════ -->
+  <div class="screen" id="permission-screen" hidden>
+    <div class="perm-icon">📍</div>
+    <div class="perm-title">Ready to Run</div>
+    <div class="perm-desc">
+      Central Park Pacer needs your camera to show the AR pacer,
+      and your location to track real pace and distance.
+    </div>
+    <div class="perm-items">
+      <div class="perm-item">
+        <div class="perm-item-icon">📷</div>
+        <div>
+          <div class="perm-item-title">Camera</div>
+          <div class="perm-item-sub">Display your AR running coach in the real world</div>
+        </div>
+      </div>
+      <div class="perm-item">
+        <div class="perm-item-icon">📍</div>
+        <div>
+          <div class="perm-item-title">Location</div>
+          <div class="perm-item-sub">Track pace, distance, and compare to target</div>
+        </div>
+      </div>
+    </div>
+    <button class="btn-primary" onclick="startARSession()" style="width:100%;max-width:320px">
+      Allow &amp; Start Running
+    </button>
+    <button onclick="navBack('pace-screen')"
+            style="background:none;border:none;color:var(--blue);font-family:inherit;
+                   font-size:15px;margin-top:18px;cursor:pointer;padding:0">
+      Go back
+    </button>
+  </div>
+
+  <!-- ════════════════════════════════════════
+       AR / RUNNING SCREEN
+  ═════════════════════════════════════════ -->
+  <div class="screen" id="ar-screen" hidden>
+
+    <!-- Camera fallback -->
+    <div class="no-camera" id="no-camera" style="display:none">
+      <div class="no-camera-icon">📷</div>
+      <div class="no-camera-title">Camera Unavailable</div>
+      <div class="no-camera-sub">Enable camera in Settings to use AR mode. Your run is still tracked.</div>
+    </div>
+
+    <!-- Live camera feed -->
+    <video id="camera-video" autoplay playsinline muted></video>
+
+    <!-- 3-D runner -->
+    <model-viewer
+      id="runner-viewer"
+      src="https://mail2tarunv-cpu.github.io/central-park-pacer/runner.glb"
+      autoplay
+      camera-orbit="0deg 80deg auto"
+      interaction-prompt="none"
+      loading="eager"
+    ></model-viewer>
+
+    <!-- HUD overlay -->
+    <div id="hud">
+
+      <!-- Top bar -->
+      <div class="hud-top">
+        <div class="hud-left">
+          <div class="hud-elapsed" id="hud-elapsed">0:00</div>
+          <div class="hud-route"   id="hud-route-name"></div>
+        </div>
+        <button class="hud-stop" onclick="stopRun()">Stop</button>
+      </div>
+
+      <!-- Status pill -->
+      <div id="hud-status" class="waiting">Waiting for GPS…</div>
+
+      <!-- Pacer label -->
+      <div id="pacer-label">Your Pacer</div>
+
+      <!-- Bottom stats card -->
+      <div class="hud-bottom">
+        <div class="hud-card">
+          <div class="pace-display">
+            <div class="pace-big" id="hud-cur-pace">--:--</div>
+            <div class="pace-unit">/mi</div>
+          </div>
+          <div class="pace-target">
+            Target pace&nbsp;&nbsp;<strong id="hud-tgt-pace">--:--</strong>&nbsp;/mi
+          </div>
+          <div class="stats-row">
+            <div class="stat">
+              <div class="stat-val" id="hud-dist">0.00</div>
+              <div class="stat-lbl">Miles</div>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat">
+              <div class="stat-val" id="hud-goal">—</div>
+              <div class="stat-lbl">Goal</div>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat">
+              <div class="stat-val" id="hud-diff">—</div>
+              <div class="stat-lbl">±&nbsp;mile</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /hud -->
+  </div><!-- /ar-screen -->
+
+
+  <script>
+    /* ════════════════════════════════════════════════════
+       DATA
+    ═════════════════════════════════════════════════════ */
+    const ROUTES = {
+      'central-park':  { name: 'Central Park Loop',  dist: 6.1   },
+      'prospect-park': { name: 'Prospect Park Loop', dist: 3.35  },
+    };
+    const PACES = {
+      'easy':     { name: 'Easy',     mpm: 10, color: '#34C759' },
+      'moderate': { name: 'Moderate', mpm: 8,  color: '#FF9500' },
+      'race':     { name: 'Race',     mpm: 6,  color: '#FF3B30' },
+    };
+
+    const state = {
+      route:      null,
+      pace:       null,
+      startTime:  null,
+      distMiles:  0,
+      lastLat:    null,
+      lastLon:    null,
+      watchId:    null,
+      timerTick:  null,
+      gpsReady:   false,
+    };
+
+    /* ════════════════════════════════════════════════════
+       SCREEN TRANSITIONS
+    ═════════════════════════════════════════════════════ */
+    function navTo(id) {
+      const cur  = document.querySelector('.screen:not([hidden])');
+      const next = document.getElementById(id);
+      if (!next || next === cur) return;
+
+      next.removeAttribute('hidden');
+      next.classList.add('slide-enter');
+      if (cur) {
+        cur.classList.add('slide-exit');
+        setTimeout(() => { cur.setAttribute('hidden', ''); cur.classList.remove('slide-exit'); }, 320);
+      }
+      setTimeout(() => next.classList.remove('slide-enter'), 320);
+    }
+
+    function navBack(id) {
+      const cur  = document.querySelector('.screen:not([hidden])');
+      const prev = document.getElementById(id);
+      if (!prev || prev === cur) return;
+
+      prev.removeAttribute('hidden');
+      prev.classList.add('slide-back-enter');
+      if (cur) {
+        cur.classList.add('slide-back-exit');
+        setTimeout(() => { cur.setAttribute('hidden', ''); cur.classList.remove('slide-back-exit'); }, 320);
+      }
+      setTimeout(() => prev.classList.remove('slide-back-enter'), 320);
+    }
+
+    /* ════════════════════════════════════════════════════
+       ROUTE SELECTION
+    ═════════════════════════════════════════════════════ */
+    function onRouteSelect(key) {
+      state.route = ROUTES[key];
+
+      document.getElementById('pace-route-label').textContent =
+        `${state.route.name} · ${state.route.dist} mi`;
+      document.getElementById('hud-route-name').textContent = state.route.name;
+      document.getElementById('hud-goal').textContent = state.route.dist;
+
+      // Reset pace state when switching routes
+      state.pace = null;
+      document.querySelectorAll('.pace-card').forEach(c => c.classList.remove('selected'));
+      document.getElementById('finish-card').style.display  = 'none';
+      document.getElementById('pace-next-btn').disabled = true;
+      updateFinishTime();
+
+      navTo('pace-screen');
+    }
+
+    /* ════════════════════════════════════════════════════
+       PACE SELECTION
+    ═════════════════════════════════════════════════════ */
+    function onPaceSelect(el) {
+      document.querySelectorAll('.pace-card').forEach(c => c.classList.remove('selected'));
+      el.classList.add('selected');
+
+      state.pace = PACES[el.dataset.pace];
+
+      updateFinishTime();
+
+      document.getElementById('finish-card').style.display = 'flex';
+      document.getElementById('pace-next-btn').disabled = false;
+
+      // Pre-fill HUD target
+      document.getElementById('hud-tgt-pace').textContent = formatPace(state.pace.mpm);
+    }
+
+    function updateFinishTime() {
+      if (!state.route || !state.pace) return;
+      const totalMin = state.route.dist * state.pace.mpm;
+      document.getElementById('finish-time-val').textContent = formatDuration(totalMin * 60);
+    }
+
+    /* ════════════════════════════════════════════════════
+       START AR SESSION
+    ═════════════════════════════════════════════════════ */
+    async function startARSession() {
+      navTo('ar-screen');
+      await new Promise(r => setTimeout(r, 50)); // let DOM paint
+
+      // Camera
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          audio: false,
+        });
+        const vid = document.getElementById('camera-video');
+        vid.srcObject = stream;
+        await vid.play().catch(() => {});
+      } catch (e) {
+        console.warn('Camera:', e);
+        document.getElementById('no-camera').style.display = 'flex';
+      }
+
+      // Init run state
+      state.startTime = Date.now();
+      state.distMiles = 0;
+      state.lastLat   = null;
+      state.lastLon   = null;
+      state.gpsReady  = false;
+
+      // Elapsed timer (every second)
+      state.timerTick = setInterval(tickTimer, 1000);
+
+      // GPS watch
+      if ('geolocation' in navigator) {
+        state.watchId = navigator.geolocation.watchPosition(
+          onGPS,
+          onGPSErr,
+          { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
+        );
+      } else {
+        setStatus('GPS not supported', 'waiting');
+      }
+    }
+
+    /* ════════════════════════════════════════════════════
+       GPS TRACKING
+    ═════════════════════════════════════════════════════ */
+    function haversine(lat1, lon1, lat2, lon2) {
+      const R   = 3958.8;                    // miles
+      const rad = d => d * Math.PI / 180;
+      const dLat = rad(lat2 - lat1);
+      const dLon = rad(lon2 - lon1);
+      const a = Math.sin(dLat / 2) ** 2
+              + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function onGPS(pos) {
+      const { latitude: lat, longitude: lon, accuracy } = pos.coords;
+
+      if (state.lastLat !== null) {
+        const d = haversine(state.lastLat, state.lastLon, lat, lon);
+        const dm = d * 1609.34;                       // metres
+        if (dm >= 2 && dm <= 80) state.distMiles += d; // filter noise & jumps
+      }
+      state.lastLat  = lat;
+      state.lastLon  = lon;
+      state.gpsReady = true;
+
+      refreshHUD();
+    }
+
+    function onGPSErr(e) {
+      console.warn('GPS error', e);
+      setStatus('GPS unavailable', 'waiting');
+    }
+
+    /* ════════════════════════════════════════════════════
+       HUD UPDATES
+    ═════════════════════════════════════════════════════ */
+    function tickTimer() {
+      if (!state.startTime) return;
+      const sec = Math.floor((Date.now() - state.startTime) / 1000);
+      document.getElementById('hud-elapsed').textContent = formatDuration(sec);
+      refreshHUD();
+    }
+
+    function refreshHUD() {
+      if (!state.startTime || !state.pace) return;
+      const elapsedMin = (Date.now() - state.startTime) / 60000;
+      const d = state.distMiles;
+
+      // Current pace
+      let paceStr = '--:--';
+      if (d >= 0.04 && elapsedMin > 0) {
+        paceStr = formatPace(elapsedMin / d);
+      }
+      document.getElementById('hud-cur-pace').textContent = paceStr;
+      document.getElementById('hud-dist').textContent = d.toFixed(2);
+
+      // Ahead / behind
+      const expected = elapsedMin / state.pace.mpm;
+      const diff     = d - expected;
+      const diffStr  = diff >= 0
+        ? '+' + Math.abs(diff).toFixed(2)
+        : '−' + Math.abs(diff).toFixed(2);
+      document.getElementById('hud-diff').textContent = diffStr;
+
+      // Status pill
+      if (!state.gpsReady) {
+        setStatus('Waiting for GPS…', 'waiting');
+      } else if (Math.abs(diff) < 0.04) {
+        setStatus('On Pace', 'on-pace');
+      } else if (diff > 0) {
+        const aheadSec = diff * state.pace.mpm * 60;
+        setStatus(`Ahead  ${fmtGap(aheadSec)}`, 'ahead');
+      } else {
+        const behindSec = Math.abs(diff) * state.pace.mpm * 60;
+        setStatus(`Behind  ${fmtGap(behindSec)}`, 'behind');
+      }
+    }
+
+    function setStatus(text, cls) {
+      const el = document.getElementById('hud-status');
+      el.textContent = text;
+      el.className   = cls;
+    }
+
+    /* ════════════════════════════════════════════════════
+       STOP RUN
+    ═════════════════════════════════════════════════════ */
+    function stopRun() {
+      clearInterval(state.timerTick);
+      if (state.watchId !== null) {
+        navigator.geolocation.clearWatch(state.watchId);
+        state.watchId = null;
+      }
+      const vid = document.getElementById('camera-video');
+      if (vid.srcObject) {
+        vid.srcObject.getTracks().forEach(t => t.stop());
+        vid.srcObject = null;
+      }
+      state.startTime = null;
+      state.distMiles = 0;
+      state.gpsReady  = false;
+
+      navBack('route-screen');
+    }
+
+    /* ════════════════════════════════════════════════════
+       FORMATTERS
+    ═════════════════════════════════════════════════════ */
+    function formatPace(mpm) {
+      const m = Math.floor(mpm);
+      const s = Math.round((mpm - m) * 60);
+      return `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    function formatDuration(totalSec) {
+      totalSec = Math.floor(totalSec);
+      const h = Math.floor(totalSec / 3600);
+      const m = Math.floor((totalSec % 3600) / 60);
+      const s = totalSec % 60;
+      if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      return `${m}:${String(s).padStart(2,'0')}`;
+    }
+
+    function fmtGap(sec) {
+      if (sec < 60) return `${Math.round(sec)}s`;
+      const m = Math.floor(sec / 60);
+      const s = Math.round(sec % 60);
+      return s > 0 ? `${m}m ${s}s` : `${m}m`;
+    }
+
+    /* ════════════════════════════════════════════════════
+       BOOT
+    ═════════════════════════════════════════════════════ */
+    document.addEventListener('DOMContentLoaded', () => {
+      // Loading screen is visible by default; transition to route after delay
+      setTimeout(() => {
+        const loading = document.getElementById('loading-screen');
+        loading.classList.add('fade-out');
+        setTimeout(() => {
+          loading.setAttribute('hidden', '');
+          loading.classList.remove('fade-out');
+          const route = document.getElementById('route-screen');
+          route.removeAttribute('hidden');
+          route.classList.add('slide-enter');
+          setTimeout(() => route.classList.remove('slide-enter'), 320);
+        }, 250);
+      }, 1600);
+    });
+  </script>
+</body>
+</html>
