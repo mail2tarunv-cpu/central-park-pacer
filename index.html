@@ -7,7 +7,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#ffffff">
   <title>Central Park Pacer</title>
-  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
   <style>
     /* ─── Reset ─────────────────────────────────────── */
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -323,22 +324,12 @@
       z-index: 0;
     }
 
-    #runner-viewer {
+    #three-canvas {
       position: absolute;
       inset: 0;
-      width: 100%;
-      height: 100%;
-      background-color: transparent !important;
-      --poster-color: transparent;
       z-index: 1;
       pointer-events: none;
-      /* force the shadow-root canvas to be transparent */
-      --mv-shadow-color: transparent;
     }
-
-    /* Punch through any default background model-viewer injects */
-    #runner-viewer::part(default-ar-button) { display: none; }
-    #runner-viewer canvas { background: transparent !important; }
 
     /* Camera unavailable fallback */
     .no-camera {
@@ -683,19 +674,8 @@
     <!-- Live camera feed -->
     <video id="camera-video" autoplay playsinline muted></video>
 
-    <!-- 3-D runner -->
-    <model-viewer
-      id="runner-viewer"
-      src="https://mail2tarunv-cpu.github.io/central-park-pacer/runner.glb"
-      autoplay
-      camera-orbit="0deg 78deg 2.8m"
-      interaction-prompt="none"
-      interaction-prompt-style="basic"
-      loading="eager"
-      reveal="auto"
-      shadow-intensity="0.6"
-      environment-image="neutral"
-    ></model-viewer>
+    <!-- Three.js canvas — transparent overlay over camera feed -->
+    <canvas id="three-canvas"></canvas>
 
     <!-- HUD overlay -->
     <div id="hud">
@@ -773,6 +753,115 @@
       timerTick:  null,
       gpsReady:   false,
     };
+
+    /* ════════════════════════════════════════════════════
+       THREE.JS AR RENDERER
+    ═════════════════════════════════════════════════════ */
+    const three = {
+      renderer: null,
+      scene:    null,
+      camera:   null,
+      mixer:    null,
+      clock:    null,
+      raf:      null,
+    };
+
+    const GLB_URL = 'https://mail2tarunv-cpu.github.io/central-park-pacer/runner.glb';
+
+    function initThree() {
+      const canvas = document.getElementById('three-canvas');
+      const W = window.innerWidth;
+      const H = window.innerHeight;
+
+      // Renderer — alpha:true gives us a transparent WebGL canvas
+      three.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+      three.renderer.setClearColor(0x000000, 0);       // fully transparent clear
+      three.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      three.renderer.setSize(W, H);
+      three.renderer.outputEncoding = THREE.sRGBEncoding;
+      three.renderer.shadowMap.enabled = false;
+
+      // Scene
+      three.scene = new THREE.Scene();
+
+      // Camera — elevated slightly so runner reads in lower-center of screen
+      three.camera = new THREE.PerspectiveCamera(55, W / H, 0.01, 100);
+      three.camera.position.set(0, 2.0, 0);
+      three.camera.lookAt(0, 0.7, -3.5);   // aimed at runner's torso 3.5 m ahead
+
+      // Lighting
+      const hemi = new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.4);
+      three.scene.add(hemi);
+      const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+      sun.position.set(2, 5, 3);
+      three.scene.add(sun);
+      const fill = new THREE.DirectionalLight(0xffffff, 0.3);
+      fill.position.set(-2, 2, -2);
+      three.scene.add(fill);
+
+      // Load GLB
+      const loader = new THREE.GLTFLoader();
+      loader.load(
+        GLB_URL,
+        (gltf) => {
+          const model = gltf.scene;
+
+          // Auto-scale to target height of 1.8 m regardless of GLB units
+          const box = new THREE.Box3().setFromObject(model);
+          const size = new THREE.Vector3();
+          box.getSize(size);
+          if (size.y > 0) {
+            const s = 1.8 / size.y;
+            model.scale.setScalar(s);
+          }
+
+          // Recompute after scaling — plant feet at y = 0
+          const box2 = new THREE.Box3().setFromObject(model);
+          model.position.set(0, -box2.min.y, -3.5);  // 3.5 m ahead
+
+          three.scene.add(model);
+
+          // Play first (run) animation on loop
+          if (gltf.animations && gltf.animations.length > 0) {
+            three.mixer = new THREE.AnimationMixer(model);
+            const clip = THREE.AnimationClip.findByName(gltf.animations, 'run')
+                      || THREE.AnimationClip.findByName(gltf.animations, 'Run')
+                      || gltf.animations[0];
+            three.mixer.clipAction(clip).play();
+          }
+        },
+        undefined,
+        (err) => console.error('GLB load error:', err)
+      );
+
+      // Render loop
+      three.clock = new THREE.Clock();
+      function loop() {
+        three.raf = requestAnimationFrame(loop);
+        const dt = three.clock.getDelta();
+        if (three.mixer) three.mixer.update(dt);
+        three.renderer.render(three.scene, three.camera);
+      }
+      loop();
+    }
+
+    function disposeThree() {
+      if (three.raf) { cancelAnimationFrame(three.raf); three.raf = null; }
+      if (three.renderer) { three.renderer.dispose(); three.renderer = null; }
+      three.scene  = null;
+      three.camera = null;
+      three.mixer  = null;
+      three.clock  = null;
+    }
+
+    // Keep canvas sized to viewport on orientation change
+    window.addEventListener('resize', () => {
+      if (!three.renderer || !three.camera) return;
+      const W = window.innerWidth, H = window.innerHeight;
+      three.camera.aspect = W / H;
+      three.camera.updateProjectionMatrix();
+      three.renderer.setSize(W, H);
+    });
 
     /* ════════════════════════════════════════════════════
        SCREEN TRANSITIONS
@@ -870,6 +959,9 @@
         console.warn('Camera:', e);
         document.getElementById('no-camera').style.display = 'flex';
       }
+
+      // Start Three.js renderer
+      initThree();
 
       // Init run state
       state.startTime = Date.now();
@@ -995,6 +1087,7 @@
       state.distMiles = 0;
       state.gpsReady  = false;
 
+      disposeThree();
       navBack('route-screen');
     }
 
