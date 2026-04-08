@@ -995,7 +995,7 @@
         const box1 = new THREE.Box3().setFromObject(model);
         three.footY = -box1.min.y;
         model.position.set(0, three.footY, -4);
-        model.rotation.y = Math.PI;   // face away from camera by default
+        model.rotation.y = 0;   // Soldier default pose faces -Z (away from camera)
 
         three.scene.add(model);
         three.model = model;
@@ -1073,7 +1073,7 @@
       if (!state.gpsReady || state.lastLat === null) {
         three.model.visible = true;
         three.model.position.set(0, three.footY, -4);
-        three.model.rotation.y = Math.PI;
+        three.model.rotation.y = 0;
         hideArrow(); return;
       }
 
@@ -1099,7 +1099,7 @@
           -Math.cos(bdR) * D
         );
         // Rotate pacer to face the direction it is running on the route
-        three.model.rotation.y = Math.PI + routeDelta * D2R;
+        three.model.rotation.y = routeDelta * D2R;
         hideArrow();
       } else {
         three.model.visible = false;
