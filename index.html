@@ -7,8 +7,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#ffffff">
   <title>Central Park Pacer</title>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
   <style>
     /* ─── Reset ─────────────────────────────────────── */
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -330,6 +330,28 @@
       z-index: 1;
       pointer-events: none;
     }
+
+    /* Debug overlay */
+    #ar-debug {
+      position: absolute;
+      top: calc(var(--safe-top) + 72px);
+      left: 14px;
+      z-index: 10;
+      background: rgba(0,0,0,.82);
+      color: #00ff88;
+      font-family: 'Menlo', 'Courier New', monospace;
+      font-size: 11px;
+      line-height: 1.7;
+      padding: 10px 13px;
+      border-radius: 10px;
+      max-width: calc(100vw - 28px);
+      pointer-events: none;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    #ar-debug .err { color: #ff5555; }
+    #ar-debug .ok  { color: #50fa7b; }
+    #ar-debug .dim { color: rgba(0,255,136,.45); }
 
     /* Camera unavailable fallback */
     .no-camera {
@@ -677,6 +699,9 @@
     <!-- Three.js canvas — transparent overlay over camera feed -->
     <canvas id="three-canvas"></canvas>
 
+    <!-- Debug overlay (remove once working) -->
+    <div id="ar-debug"></div>
+
     <!-- HUD overlay -->
     <div id="hud">
 
@@ -755,6 +780,25 @@
     };
 
     /* ════════════════════════════════════════════════════
+       DEBUG OVERLAY
+    ═════════════════════════════════════════════════════ */
+    const dbg = {
+      lines: {},
+      set(key, val, cls = '') {
+        this.lines[key] = { val, cls };
+        this._render();
+      },
+      _render() {
+        const el = document.getElementById('ar-debug');
+        if (!el) return;
+        el.innerHTML = Object.entries(this.lines)
+          .map(([k, {val, cls}]) =>
+            `<span class="${cls}">${k}: ${val}</span>`)
+          .join('\n');
+      },
+    };
+
+    /* ════════════════════════════════════════════════════
        THREE.JS AR RENDERER
     ═════════════════════════════════════════════════════ */
     const three = {
@@ -764,83 +808,126 @@
       mixer:    null,
       clock:    null,
       raf:      null,
+      frames:   0,
     };
 
     const GLB_URL = 'https://mail2tarunv-cpu.github.io/central-park-pacer/runner.glb';
 
     function initThree() {
+      // ── 1. Check libraries ──────────────────────────────
+      dbg.set('THREE',      typeof THREE       !== 'undefined' ? '✓ loaded'           : '✗ MISSING', typeof THREE       !== 'undefined' ? 'ok' : 'err');
+      dbg.set('GLTFLoader', typeof THREE       !== 'undefined' && THREE.GLTFLoader
+                              ? '✓ available' : '✗ MISSING', typeof THREE !== 'undefined' && THREE.GLTFLoader ? 'ok' : 'err');
+
+      if (typeof THREE === 'undefined') return;
+      if (!THREE.GLTFLoader) {
+        dbg.set('GLTFLoader', '✗ not on THREE global — CDN may have failed', 'err');
+        return;
+      }
+
       const canvas = document.getElementById('three-canvas');
       const W = window.innerWidth;
       const H = window.innerHeight;
+      dbg.set('viewport', `${W}×${H}`, 'dim');
 
-      // Renderer — alpha:true gives us a transparent WebGL canvas
-      three.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-      three.renderer.setClearColor(0x000000, 0);       // fully transparent clear
-      three.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      three.renderer.setSize(W, H);
-      three.renderer.outputEncoding = THREE.sRGBEncoding;
-      three.renderer.shadowMap.enabled = false;
+      // ── 2. WebGL context check ──────────────────────────
+      const testCtx = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      dbg.set('WebGL', testCtx ? '✓ ok' : '✗ no context', testCtx ? 'ok' : 'err');
+      if (!testCtx) return;
 
-      // Scene
-      three.scene = new THREE.Scene();
+      // ── 3. Renderer ─────────────────────────────────────
+      try {
+        three.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'default' });
+        three.renderer.setClearColor(0x000000, 0);
+        three.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        three.renderer.setSize(W, H);
+        three.renderer.outputEncoding = THREE.sRGBEncoding;
+        three.renderer.shadowMap.enabled = false;
+        dbg.set('renderer', '✓ created', 'ok');
+      } catch (e) {
+        dbg.set('renderer', '✗ ' + e.message, 'err');
+        return;
+      }
 
-      // Camera — elevated slightly so runner reads in lower-center of screen
+      // ── 4. Scene + camera ───────────────────────────────
+      three.scene  = new THREE.Scene();
       three.camera = new THREE.PerspectiveCamera(55, W / H, 0.01, 100);
       three.camera.position.set(0, 2.0, 0);
-      three.camera.lookAt(0, 0.7, -3.5);   // aimed at runner's torso 3.5 m ahead
+      three.camera.lookAt(0, 0.7, -3.5);
 
       // Lighting
-      const hemi = new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.4);
-      three.scene.add(hemi);
+      three.scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.4));
       const sun = new THREE.DirectionalLight(0xffffff, 1.0);
       sun.position.set(2, 5, 3);
       three.scene.add(sun);
       const fill = new THREE.DirectionalLight(0xffffff, 0.3);
       fill.position.set(-2, 2, -2);
       three.scene.add(fill);
+      dbg.set('scene', '✓ ready', 'ok');
 
-      // Load GLB
+      // ── 5. Load GLB ─────────────────────────────────────
+      dbg.set('GLB', 'loading…', 'dim');
       const loader = new THREE.GLTFLoader();
       loader.load(
         GLB_URL,
         (gltf) => {
+          const clips = gltf.animations || [];
+          dbg.set('GLB', `✓ loaded  anims:${clips.length}`, 'ok');
+
           const model = gltf.scene;
 
-          // Auto-scale to target height of 1.8 m regardless of GLB units
-          const box = new THREE.Box3().setFromObject(model);
+          // Auto-scale to 1.8 m tall regardless of export units
+          const box0 = new THREE.Box3().setFromObject(model);
           const size = new THREE.Vector3();
-          box.getSize(size);
-          if (size.y > 0) {
-            const s = 1.8 / size.y;
-            model.scale.setScalar(s);
-          }
+          box0.getSize(size);
+          dbg.set('model raw size', `y=${size.y.toFixed(3)}`, 'dim');
 
-          // Recompute after scaling — plant feet at y = 0
-          const box2 = new THREE.Box3().setFromObject(model);
-          model.position.set(0, -box2.min.y, -3.5);  // 3.5 m ahead
+          if (size.y > 0) model.scale.setScalar(1.8 / size.y);
+
+          // Plant feet at y=0, place 3.5 m ahead
+          const box1 = new THREE.Box3().setFromObject(model);
+          model.position.set(0, -box1.min.y, -3.5);
+          dbg.set('model pos', `y=${model.position.y.toFixed(2)} z=${model.position.z.toFixed(2)}`, 'dim');
 
           three.scene.add(model);
 
-          // Play first (run) animation on loop
-          if (gltf.animations && gltf.animations.length > 0) {
+          // Animation
+          if (clips.length > 0) {
             three.mixer = new THREE.AnimationMixer(model);
-            const clip = THREE.AnimationClip.findByName(gltf.animations, 'run')
-                      || THREE.AnimationClip.findByName(gltf.animations, 'Run')
-                      || gltf.animations[0];
+            const clip = THREE.AnimationClip.findByName(clips, 'run')
+                      || THREE.AnimationClip.findByName(clips, 'Run')
+                      || THREE.AnimationClip.findByName(clips, 'Running')
+                      || clips[0];
             three.mixer.clipAction(clip).play();
+            dbg.set('anim', `✓ playing "${clip.name}"`, 'ok');
+          } else {
+            dbg.set('anim', 'no animations in GLB', 'err');
           }
         },
-        undefined,
-        (err) => console.error('GLB load error:', err)
+        (xhr) => {
+          if (xhr.total > 0) {
+            dbg.set('GLB', `loading ${Math.round(xhr.loaded/xhr.total*100)}%`, 'dim');
+          }
+        },
+        (err) => {
+          const msg = err && err.message ? err.message : String(err);
+          dbg.set('GLB', '✗ ' + msg, 'err');
+          console.error('GLB load error:', err);
+        }
       );
 
-      // Render loop
-      three.clock = new THREE.Clock();
+      // ── 6. Render loop ──────────────────────────────────
+      three.clock  = new THREE.Clock();
+      three.frames = 0;
       function loop() {
         three.raf = requestAnimationFrame(loop);
         const dt = three.clock.getDelta();
         if (three.mixer) three.mixer.update(dt);
         three.renderer.render(three.scene, three.camera);
+        three.frames++;
+        if (three.frames <= 5 || three.frames % 60 === 0) {
+          dbg.set('frames', three.frames, 'dim');
+        }
       }
       loop();
     }
@@ -852,9 +939,12 @@
       three.camera = null;
       three.mixer  = null;
       three.clock  = null;
+      three.frames = 0;
+      // clear debug
+      const el = document.getElementById('ar-debug');
+      if (el) el.innerHTML = '';
     }
 
-    // Keep canvas sized to viewport on orientation change
     window.addEventListener('resize', () => {
       if (!three.renderer || !three.camera) return;
       const W = window.innerWidth, H = window.innerHeight;
