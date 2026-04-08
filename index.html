@@ -586,6 +586,23 @@
         </div>
 
       </div>
+
+      <div class="section-header">Local Testing</div>
+      <div class="list-card">
+
+        <div class="list-row" onclick="onRouteSelect('quincy-test')">
+          <div class="row-icon" style="background:rgba(255,149,0,.12)">📍</div>
+          <div class="row-body">
+            <div class="row-title">Quincy Street Test</div>
+            <div class="row-sub">0.29 miles · Brooklyn, NY</div>
+          </div>
+          <svg class="row-chevron" width="8" height="14" viewBox="0 0 8 14" fill="none">
+            <path d="M1 1l6 6-6 6" stroke="currentColor" stroke-width="1.6"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+
+      </div>
     </div>
   </div>
 
@@ -781,7 +798,8 @@
        DATA
     ═════════════════════════════════════════════════════ */
     const ROUTES = {
-      'central-park': { name: 'Central Park Loop', dist: 6.1 },
+      'central-park': { name: 'Central Park Loop',  dist: 6.1 },
+      'quincy-test':  { name: 'Quincy Street Test', dist: 0.29 },
     };
     const PACES = {
       'easy':     { name: 'Easy',     mpm: 10, color: '#34C759' },
@@ -852,6 +870,26 @@
     ];
 
     /* ════════════════════════════════════════════════════
+       ROUTE DATA — Quincy Street Test (~0.29 mi)
+       Small loop starting at 797 Quincy St, Brooklyn.
+       Clockwise: east on Quincy → south → west → north back.
+    ═════════════════════════════════════════════════════ */
+    const QUINCY_WAYPOINTS = [
+      [40.68995, -73.92619],  // Start: 797 Quincy St
+      [40.68995, -73.92576],  // East on Quincy
+      [40.68995, -73.92533],  // Quincy / Marcy Ave intersection
+      [40.68960, -73.92533],  // South on Marcy
+      [40.68920, -73.92533],  // Marcy / Gates Ave intersection
+      [40.68920, -73.92576],  // West on Gates
+      [40.68920, -73.92619],  // Continuing west on Gates
+      [40.68920, -73.92710],  // Gates / Patchen Ave intersection
+      [40.68960, -73.92710],  // North on Patchen
+      [40.68995, -73.92710],  // Patchen / Quincy intersection
+      [40.68995, -73.92665],  // East on Quincy toward start
+      [40.68995, -73.92619],  // Close loop at start
+    ];
+
+    /* ════════════════════════════════════════════════════
        GEO MATH
     ═════════════════════════════════════════════════════ */
     const D2R = Math.PI / 180;
@@ -879,36 +917,50 @@
       return d > 180 ? d - 360 : d;
     }
 
-    // Precompute cumulative distances along the route (metres)
-    const ROUTE_CUM = (() => {
+    // Precompute cumulative distances (metres) for an arbitrary waypoints array
+    function buildCum(wpts) {
       const c = [0];
-      for (let i = 1; i < ROUTE_WAYPOINTS.length; i++) {
-        const [la, lo] = ROUTE_WAYPOINTS[i-1], [lb, lb2] = ROUTE_WAYPOINTS[i];
+      for (let i = 1; i < wpts.length; i++) {
+        const [la, lo] = wpts[i-1], [lb, lb2] = wpts[i];
         c.push(c[c.length-1] + geoDistM(la, lo, lb, lb2));
       }
       return c;
-    })();
+    }
+
+    const ROUTE_CUM   = buildCum(ROUTE_WAYPOINTS);
     const ROUTE_TOTAL_M = ROUTE_CUM[ROUTE_CUM.length - 1];
 
-    // Interpolated [lat, lon] at distance distM along the route (wraps)
+    const QUINCY_CUM  = buildCum(QUINCY_WAYPOINTS);
+    const QUINCY_TOTAL_M = QUINCY_CUM[QUINCY_CUM.length - 1];
+
+    // Returns { waypoints, cum, totalM } for the currently selected route
+    function activeRouteData() {
+      if (state.route && state.route.key === 'quincy-test') {
+        return { waypoints: QUINCY_WAYPOINTS, cum: QUINCY_CUM, totalM: QUINCY_TOTAL_M };
+      }
+      return { waypoints: ROUTE_WAYPOINTS, cum: ROUTE_CUM, totalM: ROUTE_TOTAL_M };
+    }
+
+    // Interpolated { lat, lon } at distance distM along the active route (wraps)
     function positionAtDistance(distM) {
-      const d = ((distM % ROUTE_TOTAL_M) + ROUTE_TOTAL_M) % ROUTE_TOTAL_M;
-      let lo = 0, hi = ROUTE_CUM.length - 1;
-      while (hi - lo > 1) { const m = (lo+hi)>>1; if (ROUTE_CUM[m] <= d) lo=m; else hi=m; }
-      const t = (ROUTE_CUM[hi]-ROUTE_CUM[lo]) > 0
-              ? (d - ROUTE_CUM[lo]) / (ROUTE_CUM[hi] - ROUTE_CUM[lo]) : 0;
-      const [la, loa] = ROUTE_WAYPOINTS[lo];
-      const [lb, lob] = ROUTE_WAYPOINTS[hi % ROUTE_WAYPOINTS.length];
+      const { waypoints, cum, totalM } = activeRouteData();
+      const d = ((distM % totalM) + totalM) % totalM;
+      let lo = 0, hi = cum.length - 1;
+      while (hi - lo > 1) { const m = (lo+hi)>>1; if (cum[m] <= d) lo=m; else hi=m; }
+      const t = (cum[hi]-cum[lo]) > 0 ? (d - cum[lo]) / (cum[hi] - cum[lo]) : 0;
+      const [la, loa] = waypoints[lo];
+      const [lb, lob] = waypoints[hi % waypoints.length];
       return { lat: la + t*(lb-la), lon: loa + t*(lob-loa) };
     }
 
-    // Compass bearing of the route at distance distM
+    // Compass bearing of the active route at distance distM
     function bearingAtDistance(distM) {
-      const d = ((distM % ROUTE_TOTAL_M) + ROUTE_TOTAL_M) % ROUTE_TOTAL_M;
-      let lo = 0, hi = ROUTE_CUM.length - 1;
-      while (hi - lo > 1) { const m = (lo+hi)>>1; if (ROUTE_CUM[m] <= d) lo=m; else hi=m; }
-      const [la, loa] = ROUTE_WAYPOINTS[lo];
-      const [lb, lob] = ROUTE_WAYPOINTS[hi % ROUTE_WAYPOINTS.length];
+      const { waypoints, cum, totalM } = activeRouteData();
+      const d = ((distM % totalM) + totalM) % totalM;
+      let lo = 0, hi = cum.length - 1;
+      while (hi - lo > 1) { const m = (lo+hi)>>1; if (cum[m] <= d) lo=m; else hi=m; }
+      const [la, loa] = waypoints[lo];
+      const [lb, lob] = waypoints[hi % waypoints.length];
       return geoBearing(la, loa, lb, lob);
     }
 
@@ -1192,7 +1244,7 @@
        ROUTE SELECTION
     ═════════════════════════════════════════════════════ */
     function onRouteSelect(key) {
-      state.route = ROUTES[key];
+      state.route = { key, ...ROUTES[key] };
 
       document.getElementById('pace-route-label').textContent =
         `${state.route.name} · ${state.route.dist} mi`;
