@@ -416,6 +416,28 @@
     }
     .hud-stop:active { opacity: .8; }
 
+    /* Test-mode toggle */
+    #test-mode-btn {
+      background: rgba(255,255,255,.14);
+      border: 1px solid rgba(255,255,255,.22);
+      border-radius: 6px;
+      color: rgba(255,255,255,.55);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .9px;
+      padding: 3px 7px;
+      margin-top: 5px;
+      cursor: pointer;
+      font-family: inherit;
+      pointer-events: all;
+      display: inline-block;
+    }
+    #test-mode-btn.active {
+      background: rgba(255,149,0,.82);
+      border-color: transparent;
+      color: #fff;
+    }
+
     /* Status pill */
     #hud-status {
       position: absolute;
@@ -710,6 +732,7 @@
         <div class="hud-left">
           <div class="hud-elapsed" id="hud-elapsed">0:00</div>
           <div class="hud-route"   id="hud-route-name"></div>
+          <button id="test-mode-btn" onclick="toggleTestMode()">TEST</button>
         </div>
         <button class="hud-stop" onclick="stopRun()">Stop</button>
       </div>
@@ -778,6 +801,7 @@
       gpsReady:   false,
       heading:    0,       // compass heading, degrees from true north
       headingOk:  false,   // have received ≥1 valid compass reading
+      testMode:   false,   // simulate position along the route
     };
 
     /* ════════════════════════════════════════════════════
@@ -999,9 +1023,41 @@
     }
 
     /* ────────────────────────────────────────────────────
+       TEST MODE — simulate user moving along the route
+    ──────────────────────────────────────────────────── */
+    function applyTestMode() {
+      if (!state.testMode || !state.startTime || !state.pace) return;
+      const elapsedSec = (Date.now() - state.startTime) / 1000;
+      const speed      = MPM_TO_MPS(state.pace.mpm);
+      // User trails the pacer by 20 m so the robot appears just ahead
+      const userDistM  = Math.max(0, elapsedSec * speed - 20);
+      const pos        = positionAtDistance(userDistM);
+      state.lastLat  = pos.lat;
+      state.lastLon  = pos.lon;
+      state.gpsReady = true;
+      // Point the virtual compass along the route at the user's position
+      state.heading  = bearingAtDistance(userDistM);
+      state.headingOk = true;
+    }
+
+    function toggleTestMode() {
+      state.testMode = !state.testMode;
+      const btn = document.getElementById('test-mode-btn');
+      if (btn) btn.classList.toggle('active', state.testMode);
+      if (!state.testMode) {
+        // Revert to real GPS on next fix
+        state.gpsReady  = false;
+        state.lastLat   = null;
+        state.lastLon   = null;
+        state.headingOk = false;
+      }
+    }
+
+    /* ────────────────────────────────────────────────────
        AR UPDATE  — called every frame
     ──────────────────────────────────────────────────── */
     function updatePacerAR() {
+      applyTestMode();   // no-op when test mode is off
       if (!three.model || !state.startTime || !state.pace) {
         if (three.model) three.model.visible = false;
         hideArrow(); return;
@@ -1238,16 +1294,19 @@
     }
 
     function onGPS(pos) {
-      const { latitude: lat, longitude: lon, accuracy } = pos.coords;
+      const { latitude: lat, longitude: lon } = pos.coords;
 
-      if (state.lastLat !== null) {
-        const d = haversine(state.lastLat, state.lastLon, lat, lon);
-        const dm = d * 1609.34;                       // metres
-        if (dm >= 2 && dm <= 80) state.distMiles += d; // filter noise & jumps
+      if (!state.testMode) {
+        if (state.lastLat !== null) {
+          const d  = haversine(state.lastLat, state.lastLon, lat, lon);
+          const dm = d * 1609.34;
+          if (dm >= 2 && dm <= 80) state.distMiles += d;
+        }
+        state.lastLat  = lat;
+        state.lastLon  = lon;
+        state.gpsReady = true;
       }
-      state.lastLat  = lat;
-      state.lastLon  = lon;
-      state.gpsReady = true;
+      // In test mode: ignore real fix; applyTestMode() owns lat/lon
 
       refreshHUD();
     }
@@ -1326,6 +1385,9 @@
       state.distMiles = 0;
       state.gpsReady  = false;
       state.headingOk = false;
+      state.testMode  = false;
+      const tb = document.getElementById('test-mode-btn');
+      if (tb) tb.classList.remove('active');
 
       detachCompass();
       hideArrow();
