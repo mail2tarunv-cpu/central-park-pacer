@@ -749,6 +749,14 @@
     <!-- Three.js canvas — transparent overlay over camera feed -->
     <canvas id="three-canvas"></canvas>
 
+    <!-- Debug panel -->
+    <div id="debug-panel" style="
+      position:absolute; top:80px; left:10px; z-index:10;
+      background:rgba(0,0,0,0.8); color:#0f0; font:12px/1.7 monospace;
+      padding:8px 10px; border-radius:8px; pointer-events:none;
+      white-space:pre; min-width:200px;
+    ">Waiting for model…</div>
+
     <!-- Off-screen pacer direction indicator -->
     <div id="pacer-arrow">
       <svg class="arrow-svg" viewBox="0 0 24 24" fill="none">
@@ -1053,22 +1061,27 @@
       fill.position.set(-2, 2, -2);
       three.scene.add(fill);
 
+      window._dbgEl = document.getElementById('debug-panel');
       const loader = new THREE.GLTFLoader();
       loader.load(GLB_URL, (gltf) => {
         const model = gltf.scene;
         const clips = gltf.animations || [];
 
-        // Log raw bounding box before any scaling
+        // NO scaling — measure raw unscaled model
         const rawBox = new THREE.Box3().setFromObject(model);
-        console.log('[Pacer] GLB raw bbox min:', rawBox.min, 'max:', rawBox.max,
-          'size:', rawBox.max.x - rawBox.min.x, rawBox.max.y - rawBox.min.y, rawBox.max.z - rawBox.min.z);
+        const rawSize = new THREE.Vector3();
+        rawBox.getSize(rawSize);
+        console.log('[Pacer] raw size:', rawSize);
+        if (window._dbgEl) window._dbgEl.textContent =
+          `RAW bbox (no scale)\n` +
+          `x: ${rawSize.x.toFixed(3)}\n` +
+          `y: ${rawSize.y.toFixed(3)}\n` +
+          `z: ${rawSize.z.toFixed(3)}\n` +
+          `min.y: ${rawBox.min.y.toFixed(3)}\n` +
+          `max.y: ${rawBox.max.y.toFixed(3)}`;
 
-        // Hard scale override — ignore bounding box
-        model.scale.set(0.01, 0.01, 0.01);
-        console.log('[Pacer] Model loaded, scale forced to 0.01');
-
-        model.position.set(0, 0, -3);
-        model.rotation.y = Math.PI;  // face away from camera
+        // No position change — place at origin so it's in view
+        model.rotation.y = Math.PI;
 
         three.scene.add(model);
         three.model = model;
