@@ -749,14 +749,6 @@
     <!-- Three.js canvas — transparent overlay over camera feed -->
     <canvas id="three-canvas"></canvas>
 
-    <!-- Debug panel -->
-    <div id="debug-panel" style="
-      position:absolute; top:80px; left:10px; z-index:10;
-      background:rgba(0,0,0,0.75); color:#0f0; font:11px/1.6 monospace;
-      padding:8px 10px; border-radius:8px; pointer-events:none;
-      white-space:pre; min-width:220px;
-    ">Loading…</div>
-
     <!-- Off-screen pacer direction indicator -->
     <div id="pacer-arrow">
       <svg class="arrow-svg" viewBox="0 0 24 24" fill="none">
@@ -1049,9 +1041,9 @@
 
       three.scene = new THREE.Scene();
 
-      three.camera = new THREE.PerspectiveCamera(60, W / H, 0.01, 500);
-      three.camera.position.set(0, 1.6, 0);
-      three.camera.lookAt(0, 1, -6);
+      three.camera = new THREE.PerspectiveCamera(50, W / H, 0.01, 500);
+      three.camera.position.set(0, 1.6, 6);
+      three.camera.lookAt(0, 0.9, -6);
 
       three.scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.4));
       const sun = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -1093,11 +1085,6 @@
         }
       }, undefined, err => console.error('GLB:', err));
 
-      const _frustum = new THREE.Frustum();
-      const _mProj   = new THREE.Matrix4();
-      const _dbgEl   = document.getElementById('debug-panel');
-      let   _dbgTick = 0;
-
       three.clock = new THREE.Clock();
       (function loop() {
         three.raf = requestAnimationFrame(loop);
@@ -1105,31 +1092,6 @@
         updatePacerAR();
         if (three.mixer) three.mixer.update(dt);
         three.renderer.render(three.scene, three.camera);
-
-        // Update debug panel ~4×/sec
-        if (_dbgEl && ++_dbgTick % 15 === 0) {
-          if (three.model) {
-            const wp  = new THREE.Vector3();
-            three.model.getWorldPosition(wp);
-            const bb  = new THREE.Box3().setFromObject(three.model);
-            const sz  = new THREE.Vector3();
-            bb.getSize(sz);
-            const cp  = three.camera.position;
-            _mProj.multiplyMatrices(three.camera.projectionMatrix, three.camera.matrixWorldInverse);
-            _frustum.setFromProjectionMatrix(_mProj);
-            const inFrustum = _frustum.containsPoint(wp);
-            const anim = three.action && three.action.isRunning() ? 'yes' : 'no';
-            _dbgEl.textContent =
-              `model pos : ${wp.x.toFixed(2)}, ${wp.y.toFixed(2)}, ${wp.z.toFixed(2)}\n` +
-              `model size: ${sz.x.toFixed(2)}, ${sz.y.toFixed(2)}, ${sz.z.toFixed(2)}\n` +
-              `camera pos: ${cp.x.toFixed(2)}, ${cp.y.toFixed(2)}, ${cp.z.toFixed(2)}\n` +
-              `in frustum: ${inFrustum ? 'YES' : 'NO'}\n` +
-              `model.vis : ${three.model.visible}\n` +
-              `anim play : ${anim}`;
-          } else {
-            _dbgEl.textContent = 'model: not loaded yet';
-          }
-        }
       })();
     }
 
@@ -1202,12 +1164,12 @@
 
       if (inCone && inRange) {
         three.model.visible = true;
-        const D   = 6;       // display distance from camera (m); camera is at Z=0
+        const D   = 12;      // display distance from camera (m); camera is at Z=6
         const bdR = bearDelta * D2R;
         three.model.position.set(
           Math.sin(bdR) * D,
           -1.5,
-          -Math.cos(bdR) * D   // 0 - 6 = -6 for straight ahead
+          6 - Math.cos(bdR) * D   // 6 - 12 = -6 for straight ahead
         );
         // Face the direction the route is heading; π offset so back is toward camera
         three.model.rotation.y = Math.PI + routeDelta * D2R;
