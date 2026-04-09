@@ -1041,10 +1041,9 @@
 
       three.scene = new THREE.Scene();
 
-      // Camera pulled well back so the figure appears small (person 15 m ahead)
       three.camera = new THREE.PerspectiveCamera(60, W / H, 0.01, 500);
-      three.camera.position.set(0, 1.6, 12);
-      three.camera.lookAt(0, 0.9, 0);
+      three.camera.position.set(0, 1.6, 0);
+      three.camera.lookAt(0, 1, -6);
 
       three.scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.4));
       const sun = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -1059,11 +1058,16 @@
         const model = gltf.scene;
         const clips = gltf.animations || [];
 
-        // Fixed scale regardless of GLB's built-in size
-        model.scale.setScalar(0.008);
+        // Measure raw bounding box before any scaling
+        const rawBox = new THREE.Box3().setFromObject(model);
+        const rawH = rawBox.max.y - rawBox.min.y;
+        console.log('[Pacer] GLB raw bounding box:', rawBox.min, rawBox.max, 'height:', rawH);
 
-        // Camera is at Z=12; Z=-8 puts model 20 m ahead along Z axis
-        model.position.set(0, -1, -8);
+        // Scale so model is exactly 1.8 m tall
+        if (rawH > 0) model.scale.setScalar(1.8 / rawH);
+        console.log('[Pacer] Model loaded — scale set to', model.scale.x.toFixed(4), '(rawH:', rawH.toFixed(3), ')');
+
+        model.position.set(0, -1.5, -6);
         model.rotation.y = Math.PI;  // face away from camera
 
         three.scene.add(model);
@@ -1141,7 +1145,7 @@
       // No GPS or no compass → show pacer locked straight ahead
       if (!state.gpsReady || state.lastLat === null || !state.headingOk) {
         three.model.visible = true;
-        three.model.position.set(0, -1, -8);  // 20 m ahead (camZ=12, 12-20=-8)
+        three.model.position.set(0, -1.5, -6);  // fixed ahead of camera
         three.model.rotation.y = Math.PI;
         hideArrow(); return;
       }
@@ -1160,13 +1164,12 @@
 
       if (inCone && inRange) {
         three.model.visible = true;
-        const D   = 20;      // display distance from camera (m); camera is at Z=12
+        const D   = 6;       // display distance from camera (m); camera is at Z=0
         const bdR = bearDelta * D2R;
-        // Camera is at (0, 1.6, 12) — offset model from camera position
         three.model.position.set(
           Math.sin(bdR) * D,
-          -1,
-          12 - Math.cos(bdR) * D   // 12 - 20 = -8 for straight ahead
+          -1.5,
+          -Math.cos(bdR) * D   // 0 - 6 = -6 for straight ahead
         );
         // Face the direction the route is heading; π offset so back is toward camera
         three.model.rotation.y = Math.PI + routeDelta * D2R;
