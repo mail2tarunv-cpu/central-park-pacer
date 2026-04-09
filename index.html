@@ -324,9 +324,15 @@
       z-index: 0;
     }
 
+    /* Fixed-size sprite canvas — always centered, lower portion of screen */
     #three-canvas {
       position: absolute;
-      inset: 0;
+      left: 50%;
+      top: 55%;
+      width: 200px;
+      height: 300px;
+      transform: translateX(-50%) translateY(-50%);
+      transform-origin: center center;
       z-index: 1;
       pointer-events: none;
     }
@@ -1038,20 +1044,23 @@
 
     function initThree() {
       const canvas = document.getElementById('three-canvas');
-      const W = window.innerWidth, H = window.innerHeight;
+      // Fixed sprite size — 200×300 px regardless of screen size
+      const SW = 200, SH = 300;
 
       three.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'default' });
       three.renderer.setClearColor(0x000000, 0);
       three.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      three.renderer.setSize(W, H);
+      three.renderer.setSize(SW, SH);
       three.renderer.outputEncoding = THREE.sRGBEncoding;
       three.renderer.shadowMap.enabled = false;
 
       three.scene = new THREE.Scene();
 
-      three.camera = new THREE.PerspectiveCamera(60, W / H, 0.01, 500);
-      three.camera.position.set(0, 1.0, 0);
-      three.camera.lookAt(0, 0.5, -5);
+      // Camera framed tightly on the model — fixed aspect matches sprite size
+      three.camera = new THREE.PerspectiveCamera(45, SW / SH, 0.01, 500);
+      // Model will be at origin; place camera 2 units back, eye-level
+      three.camera.position.set(0, 0.9, 2);
+      three.camera.lookAt(0, 0.9, 0);
 
       three.scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.4));
       const sun = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -1061,21 +1070,36 @@
       fill.position.set(-2, 2, -2);
       three.scene.add(fill);
 
-      const _dbgEl  = document.getElementById('debug-panel');
-      const _frustum = new THREE.Frustum();
-      const _mProj   = new THREE.Matrix4();
+      const _dbgEl = document.getElementById('debug-panel');
       let   _dbgTick = 0;
+
       const loader = new THREE.GLTFLoader();
       loader.load(GLB_URL, (gltf) => {
         const model = gltf.scene;
         const clips = gltf.animations || [];
 
-        model.scale.set(50, 50, 50);
-        model.position.set(0, -0.9, -5);
-        model.rotation.y = Math.PI;
+        // Scale to ~1.8m using bounding box, then fit to sprite viewport
+        const rawBox = new THREE.Box3().setFromObject(model);
+        const rawH   = rawBox.max.y - rawBox.min.y;
+        const rawMin = rawBox.min.y;
+        console.log('[Pacer] raw height:', rawH, 'min.y:', rawMin);
+        if (rawH > 0) model.scale.setScalar(1.8 / rawH);
+
+        // Recompute after scaling; lift feet to y=0
+        const scaledBox = new THREE.Box3().setFromObject(model);
+        model.position.set(0, -scaledBox.min.y, 0);
+
+        // Adjust camera distance so full body fills the sprite height
+        const scaledH = scaledBox.max.y - scaledBox.min.y;
+        const dist = (scaledH / 2) / Math.tan((45 / 2) * D2R) * 1.1;
+        three.camera.position.set(0, scaledH / 2, dist);
+        three.camera.lookAt(0, scaledH / 2, 0);
+
+        model.rotation.y = Math.PI;  // face away from camera
 
         three.scene.add(model);
         three.model = model;
+        console.log('[Pacer] model loaded, scaled height:', scaledH.toFixed(2), 'cam dist:', dist.toFixed(2));
 
         if (clips.length > 0) {
           three.mixer = new THREE.AnimationMixer(model);
@@ -1098,23 +1122,20 @@
         three.renderer.render(three.scene, three.camera);
 
         if (_dbgEl && ++_dbgTick % 15 === 0) {
+          const cp = three.camera.position;
           if (three.model) {
-            const wp = new THREE.Vector3();
-            three.model.getWorldPosition(wp);
             const bb = new THREE.Box3().setFromObject(three.model);
             const sz = new THREE.Vector3(); bb.getSize(sz);
-            const cp = three.camera.position;
-            _mProj.multiplyMatrices(three.camera.projectionMatrix, three.camera.matrixWorldInverse);
-            _frustum.setFromProjectionMatrix(_mProj);
-            const inf = _frustum.containsPoint(wp);
+            const el = document.getElementById('three-canvas');
+            const tf = el ? el.style.transform : '?';
             _dbgEl.textContent =
-              `model pos : ${wp.x.toFixed(1)}, ${wp.y.toFixed(1)}, ${wp.z.toFixed(1)}\n` +
-              `model size: ${sz.x.toFixed(1)}, ${sz.y.toFixed(1)}, ${sz.z.toFixed(1)}\n` +
-              `cam pos   : ${cp.x.toFixed(1)}, ${cp.y.toFixed(1)}, ${cp.z.toFixed(1)}\n` +
-              `in frustum: ${inf ? 'YES' : 'NO'}\n` +
-              `visible   : ${three.model.visible}`;
+              `model size: ${sz.x.toFixed(2)}, ${sz.y.toFixed(2)}, ${sz.z.toFixed(2)}\n` +
+              `cam pos   : ${cp.x.toFixed(2)}, ${cp.y.toFixed(2)}, ${cp.z.toFixed(2)}\n` +
+              `visible   : ${three.model.visible}\n` +
+              `anim      : ${three.action && three.action.isRunning() ? 'playing' : 'stopped'}\n` +
+              `canvas css: ${tf}`;
           } else {
-            _dbgEl.textContent = 'model not loaded';
+            _dbgEl.textContent = `cam pos: ${cp.x.toFixed(2)}, ${cp.y.toFixed(2)}, ${cp.z.toFixed(2)}\nmodel: loading…`;
           }
         }
       })();
@@ -1155,9 +1176,12 @@
        AR UPDATE  — called every frame
     ──────────────────────────────────────────────────── */
     function updatePacerAR() {
-      applyTestMode();   // no-op when test mode is off
+      applyTestMode();
+      const canvasEl = document.getElementById('three-canvas');
+
       if (!three.model || !state.startTime || !state.pace) {
         if (three.model) three.model.visible = false;
+        if (canvasEl) canvasEl.style.display = 'none';
         hideArrow(); return;
       }
 
@@ -1167,40 +1191,40 @@
       const pacerPos   = positionAtDistance(pacerDistM);
       const pacerBear  = bearingAtDistance(pacerDistM);
 
-      // No GPS or no compass → show pacer locked straight ahead
+      // No GPS or no compass → show pacer locked center-screen, no rotation
       if (!state.gpsReady || state.lastLat === null || !state.headingOk) {
         three.model.visible = true;
-        three.model.position.set(0, -0.9, -5);
         three.model.rotation.y = Math.PI;
+        if (canvasEl) {
+          canvasEl.style.display = 'block';
+          canvasEl.style.transform = 'translateX(-50%) translateY(-50%)';
+        }
         hideArrow(); return;
       }
 
-      const distToP  = geoDistM(state.lastLat, state.lastLon, pacerPos.lat, pacerPos.lon);
-      const bearToP  = geoBearing(state.lastLat, state.lastLon, pacerPos.lat, pacerPos.lon);
-
-      // How far off-center (left/right) is the pacer relative to where user faces?
-      // positive = pacer is to the right
-      const bearDelta  = angleDiff(state.heading, bearToP);
-      // Direction the pacer is running in user's reference frame
+      const distToP   = geoDistM(state.lastLat, state.lastLon, pacerPos.lat, pacerPos.lon);
+      const bearToP   = geoBearing(state.lastLat, state.lastLon, pacerPos.lat, pacerPos.lon);
+      const bearDelta = angleDiff(state.heading, bearToP);   // +right, −left
       const routeDelta = angleDiff(state.heading, pacerBear);
 
-      const inCone  = Math.abs(bearDelta) < 30;  // ±30° = total 60° view cone
-      const inRange = distToP < 50;              // within 50 m
+      const inCone  = Math.abs(bearDelta) < 30;
+      const inRange = distToP < 50;
 
       if (inCone && inRange) {
+        // Shift the sprite horizontally based on bearing delta
+        // At ±30° the sprite moves to the edge; scale: 1° ≈ 1% of half screen width
+        const shiftPct = bearDelta / 30 * 40;  // max ±40% of screen width offset
         three.model.visible = true;
-        const D   = 5;       // display distance from camera (m); camera is at Z=0
-        const bdR = bearDelta * D2R;
-        three.model.position.set(
-          Math.sin(bdR) * D,
-          -0.9,
-          -Math.cos(bdR) * D   // 0 - 5 = -5 for straight ahead
-        );
-        // Face the direction the route is heading; π offset so back is toward camera
+        // Rotate model so it faces the direction it's running
         three.model.rotation.y = Math.PI + routeDelta * D2R;
+        if (canvasEl) {
+          canvasEl.style.display = 'block';
+          canvasEl.style.transform = `translateX(calc(-50% + ${shiftPct}vw)) translateY(-50%)`;
+        }
         hideArrow();
       } else {
         three.model.visible = false;
+        if (canvasEl) canvasEl.style.display = 'none';
         showArrow(bearDelta, distToP);
       }
     }
@@ -1246,11 +1270,8 @@
     }
 
     window.addEventListener('resize', () => {
+      // Canvas is fixed 200×300 sprite — no resize needed
       if (!three.renderer || !three.camera) return;
-      const W = window.innerWidth, H = window.innerHeight;
-      three.camera.aspect = W / H;
-      three.camera.updateProjectionMatrix();
-      three.renderer.setSize(W, H);
     });
 
     /* ════════════════════════════════════════════════════
