@@ -324,13 +324,13 @@
       z-index: 0;
     }
 
-    /* Fixed-size sprite canvas — centered, lower third of screen */
+    /* Fixed-size portrait sprite — centered, lower third of screen */
     #three-canvas {
       position: absolute;
       left: 50%;
-      top: 68%;
-      width: 200px;
-      height: 220px;
+      top: 65%;
+      width: 160px;
+      height: 300px;
       transform: translateX(-50%) translateY(-50%);
       transform-origin: center center;
       z-index: 1;
@@ -1036,7 +1036,7 @@
 
     function initThree() {
       const canvas = document.getElementById('three-canvas');
-      const SW = 200, SH = 220;  // sprite size: ~25% of a 844px iPhone screen
+      const SW = 160, SH = 300;  // portrait sprite; ~35% of iPhone screen height
 
       three.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'default' });
       three.renderer.setClearColor(0x000000, 0);
@@ -1049,7 +1049,7 @@
 
       // Camera created with placeholder values; auto-framed after model loads
       const FOV = 60;
-      three.camera = new THREE.PerspectiveCamera(FOV, SW / SH, 0.01, 500);
+      three.camera = new THREE.PerspectiveCamera(FOV, SW / SH, 0.1, 100);
 
       three.scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.4));
       const sun = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -1064,28 +1064,27 @@
         const model = gltf.scene;
         const clips = gltf.animations || [];
 
-        // Step 1: measure raw model
+        // Step 1: scale to 1.8m tall
         const rawBox = new THREE.Box3().setFromObject(model);
         const rawH   = rawBox.max.y - rawBox.min.y;
-
-        // Step 2: scale to 1.8m tall
         if (rawH > 0) model.scale.setScalar(1.8 / rawH);
 
-        // Step 3: center model — feet at y=0, centered on x/z
-        const box  = new THREE.Box3().setFromObject(model);
+        // Step 2: rotate FIRST so bbox reflects final orientation
+        model.rotation.y = Math.PI;
+
+        // Step 3: measure bbox after scale+rotation, then center
+        const box    = new THREE.Box3().setFromObject(model);
         const center = new THREE.Vector3();
         box.getCenter(center);
         const modelH = box.max.y - box.min.y;
+        // Feet at y=0, centered on x/z
         model.position.set(-center.x, -box.min.y, -center.z);
 
-        // Step 4: auto-frame camera
-        // Distance so model fills the vertical FOV, with 10% padding
-        const camDist = (modelH / 2) / Math.tan((FOV / 2) * D2R) * 1.1;
-        const midY    = modelH / 2;
+        // Step 4: auto-frame — camera dist = modelH * 2 as user specified
+        const midY    = modelH / 2;   // world centre Y after positioning
+        const camDist = modelH * 2;
         three.camera.position.set(0, midY, camDist);
         three.camera.lookAt(0, midY, 0);
-
-        model.rotation.y = Math.PI;  // face away from camera
 
         three.scene.add(model);
         three.model = model;
