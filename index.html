@@ -1081,7 +1081,7 @@
         const rawH   = rawBox.max.y - rawBox.min.y;
         const rawMin = rawBox.min.y;
         console.log('[Pacer] raw height:', rawH, 'min.y:', rawMin);
-        if (rawH > 0) model.scale.setScalar(1.8 / rawH);
+        model.scale.setScalar(25);
 
         // Lift feet to y=0
         const scaledBox = new THREE.Box3().setFromObject(model);
