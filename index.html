@@ -1146,58 +1146,67 @@
     /* ────────────────────────────────────────────────────
        AR UPDATE  — called every frame
     ──────────────────────────────────────────────────── */
+    const _canvasEl = document.getElementById('three-canvas');
+
     function updatePacerAR() {
       applyTestMode();
-      const canvasEl = document.getElementById('three-canvas');
 
       if (!three.model || !state.startTime || !state.pace) {
-        if (three.model) three.model.visible = false;
-        if (canvasEl) canvasEl.style.display = 'none';
+        if (_canvasEl) _canvasEl.style.display = 'none';
         hideArrow(); return;
       }
 
-      // Where is the pacer on the route right now?
       const elapsedSec = (Date.now() - state.startTime) / 1000;
-      const pacerDistM = elapsedSec * MPM_TO_MPS(state.pace.mpm);
-      const pacerPos   = positionAtDistance(pacerDistM);
-      const pacerBear  = bearingAtDistance(pacerDistM);
 
-      // No GPS or no compass → show pacer locked center-screen, no rotation
+      // ── 1. PACER DISTANCE ────────────────────────────
+      // How far ahead the pacer is in meters (positive = pacer ahead, negative = you ahead)
+      const pacerDistM = elapsedSec * MPM_TO_MPS(state.pace.mpm);
+      const userDistM  = state.distMiles * 1609.34;  // accumulated GPS meters
+      const aheadM     = pacerDistM - userDistM;     // metres pacer is ahead of you
+
+      // Pacer's position and heading on the route
+      const pacerPos  = positionAtDistance(pacerDistM);
+      const pacerBear = bearingAtDistance(pacerDistM);
+
+      // ── 2. BEARING (compass) ─────────────────────────
+      // Without GPS+compass: show pacer centered, scale based on time-distance
       if (!state.gpsReady || state.lastLat === null || !state.headingOk) {
-        three.model.visible = true;
+        const s = Math.max(0.2, 1 / (1 + Math.max(0, aheadM) * 0.05));
         three.model.rotation.y = Math.PI;
-        if (canvasEl) {
-          canvasEl.style.display = 'block';
-          canvasEl.style.transform = 'translateX(-50%) translateY(-50%)';
-        }
+        _canvasEl.style.display = 'block';
+        _canvasEl.style.transform = `translateX(-50%) translateY(-50%) scale(${s.toFixed(3)})`;
         hideArrow(); return;
       }
 
-      const distToP   = geoDistM(state.lastLat, state.lastLon, pacerPos.lat, pacerPos.lon);
-      const bearToP   = geoBearing(state.lastLat, state.lastLon, pacerPos.lat, pacerPos.lon);
-      const bearDelta = angleDiff(state.heading, bearToP);   // +right, −left
+      const bearToP    = geoBearing(state.lastLat, state.lastLon, pacerPos.lat, pacerPos.lon);
+      const bearDelta  = angleDiff(state.heading, bearToP);   // +right, −left
       const routeDelta = angleDiff(state.heading, pacerBear);
 
-      const inCone  = Math.abs(bearDelta) < 30;
-      const inRange = distToP < 50;
-
-      if (inCone && inRange) {
-        // Shift the sprite horizontally based on bearing delta
-        // At ±30° the sprite moves to the edge; scale: 1° ≈ 1% of half screen width
-        const shiftPct = bearDelta / 30 * 40;  // max ±40% of screen width offset
-        three.model.visible = true;
-        // Rotate model so it faces the direction it's running
-        three.model.rotation.y = Math.PI + routeDelta * D2R;
-        if (canvasEl) {
-          canvasEl.style.display = 'block';
-          canvasEl.style.transform = `translateX(calc(-50% + ${shiftPct}vw)) translateY(-50%)`;
-        }
-        hideArrow();
-      } else {
-        three.model.visible = false;
-        if (canvasEl) canvasEl.style.display = 'none';
-        showArrow(bearDelta, distToP);
+      // ── 3. HIDE MODEL if pacer too far or off-screen ─
+      if (aheadM > 50 || Math.abs(bearDelta) > 45) {
+        _canvasEl.style.display = 'none';
+        showArrow(bearDelta, aheadM);
+        return;
       }
+
+      // ── 4. VISUAL SCALE based on distance ────────────
+      // 0m → scale 1.0 (large, next to you)
+      // 10m → scale ~0.67
+      // 30m → scale ~0.40
+      // 50m → hidden
+      const s = Math.max(0.2, 1 / (1 + Math.max(0, aheadM) * 0.05));
+
+      // ── 5. HORIZONTAL SHIFT based on bearing ─────────
+      // bearDelta=0 → centred; ±45° → shift ±35vw
+      const shiftVw = (bearDelta / 45) * 35;
+
+      // Rotate model to face direction of travel
+      three.model.rotation.y = Math.PI + routeDelta * D2R;
+
+      _canvasEl.style.display = 'block';
+      _canvasEl.style.transform =
+        `translateX(calc(-50% + ${shiftVw.toFixed(1)}vw)) translateY(-50%) scale(${s.toFixed(3)})`;
+      hideArrow();
     }
 
     /* ────────────────────────────────────────────────────
